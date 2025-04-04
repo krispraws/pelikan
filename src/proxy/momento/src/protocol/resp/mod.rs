@@ -4,7 +4,7 @@
 
 use std::future::Future;
 
-use momento::response::MomentoError;
+use momento::MomentoError;
 pub use protocol_resp::{Request, RequestParser};
 
 mod del;
@@ -24,7 +24,6 @@ mod llen;
 mod lpop;
 mod lpush;
 mod lrange;
-mod ltrim;
 mod rpop;
 mod rpush;
 mod sadd;
@@ -41,7 +40,6 @@ pub use self::llen::*;
 pub use self::lpop::*;
 pub use self::lpush::*;
 pub use self::lrange::*;
-pub use self::ltrim::*;
 pub use self::rpop::*;
 pub use self::rpush::*;
 pub use self::sdiff::*;

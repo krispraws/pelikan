@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use momento::response::DictionaryGet;
-use momento::SimpleCacheClient;
+use momento::cache::DictionaryGetFieldsResponse;
+use momento::CacheClient;
 use protocol_resp::{HashExists, HEXISTS, HEXISTS_EX, HEXISTS_HIT, HEXISTS_MISS};
 use tokio::time::timeout;
 
@@ -17,7 +17,7 @@ use crate::ProxyError;
 use super::update_method_metrics;
 
 pub async fn hexists(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &HashExists,
@@ -25,7 +25,7 @@ pub async fn hexists(
     update_method_metrics(&HEXISTS, &HEXISTS_EX, async move {
         let response = match timeout(
             Duration::from_millis(200),
-            client.dictionary_get(cache_name, req.key(), vec![req.field()]),
+            client.dictionary_get_fields(cache_name, req.key(), vec![req.field()]),
         )
         .await
         {
@@ -41,8 +41,10 @@ pub async fn hexists(
         };
 
         match response {
-            DictionaryGet::Hit { value } => {
-                let map: HashMap<Vec<u8>, Vec<u8>> = value.collect_into();
+            DictionaryGetFieldsResponse::Hit { .. } => {
+                let map: HashMap<Vec<u8>, Vec<u8>> = response
+                    .try_into()
+                    .expect("should always be able to read dictionary fields as bytes");
 
                 if let Some(_value) = map.get(req.field()) {
                     HEXISTS_HIT.increment();
@@ -54,7 +56,7 @@ pub async fn hexists(
                     klog_2(&"hexists", &req.key(), &req.field(), Status::Miss, 0);
                 }
             }
-            DictionaryGet::Miss => {
+            DictionaryGetFieldsResponse::Miss => {
                 HEXISTS_MISS.increment();
                 response_buf.extend_from_slice(b":0\r\n");
                 klog_2(&"hexists", &req.key(), &req.field(), Status::Miss, 0);

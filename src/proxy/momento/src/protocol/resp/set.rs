@@ -4,7 +4,8 @@
 
 use std::time::Duration;
 
-use momento::SimpleCacheClient;
+use momento::cache::SetRequest;
+use momento::CacheClient;
 use protocol_memcache::{SET, SET_EX, SET_STORED};
 use protocol_resp::Set;
 
@@ -14,7 +15,7 @@ use crate::klog::{klog_set, Status};
 use super::update_method_metrics;
 
 pub async fn set(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &Set,
@@ -29,36 +30,36 @@ pub async fn set(
             None => None,
         };
 
-        let _response = match tokio::time::timeout(
-            Duration::from_millis(200),
-            client.set(cache_name, req.key(), req.value(), ttl),
-        )
-        .await
-        {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => {
-                klog_set(
-                    &req.key(),
-                    0,
-                    ttl.map(|v| v.as_millis()).unwrap_or(0) as i32,
-                    req.value().len(),
-                    Status::ServerError,
-                    0,
-                );
-                return Err(ProxyError::from(e));
-            }
-            Err(e) => {
-                klog_set(
-                    &req.key(),
-                    0,
-                    ttl.map(|v| v.as_millis()).unwrap_or(0) as i32,
-                    req.value().len(),
-                    Status::Timeout,
-                    0,
-                );
-                return Err(ProxyError::from(e));
-            }
-        };
+        let mut r = SetRequest::new(cache_name, req.key(), req.value());
+        if let Some(ttl) = ttl {
+            r = r.ttl(ttl);
+        }
+        let _response =
+            match tokio::time::timeout(Duration::from_millis(200), client.send_request(r)).await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    klog_set(
+                        &req.key(),
+                        0,
+                        ttl.map(|v| v.as_millis()).unwrap_or(0) as i32,
+                        req.value().len(),
+                        Status::ServerError,
+                        0,
+                    );
+                    return Err(ProxyError::from(e));
+                }
+                Err(e) => {
+                    klog_set(
+                        &req.key(),
+                        0,
+                        ttl.map(|v| v.as_millis()).unwrap_or(0) as i32,
+                        req.value().len(),
+                        Status::Timeout,
+                        0,
+                    );
+                    return Err(ProxyError::from(e));
+                }
+            };
 
         SET_STORED.increment();
         klog_set(

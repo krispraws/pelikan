@@ -5,12 +5,13 @@
 use std::io::Write;
 
 use crate::*;
+use momento::cache::{ListLengthResponse, ListPopFrontResponse};
 use protocol_resp::{ListPop, LPOP, LPOP_EX};
 
 use super::update_method_metrics;
 
 pub async fn lpop(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &ListPop,
@@ -19,20 +20,24 @@ pub async fn lpop(
         let tout = Duration::from_millis(200);
 
         match req.count() {
+            // If count is not provided, we pop a single element.
             None => match timeout(tout, client.list_pop_front(cache_name, req.key())).await?? {
-                Some(item) => {
+                ListPopFrontResponse::Hit { value } => {
+                    let item: Vec<u8> = value.try_into().expect("Expected a byte vector");
                     write!(response_buf, "${}\r\n", item.len())?;
                     response_buf.extend_from_slice(&item);
                     response_buf.extend_from_slice(b"\r\n");
                 }
-                None => {
+                ListPopFrontResponse::Miss => {
                     response_buf.extend_from_slice(b"$-1\r\n");
                 }
             },
+            // If count is 0, we return an empty list if the list exists and nil if it doesn't.
             Some(0) => match timeout(tout, client.list_length(cache_name, req.key())).await?? {
-                Some(_) => response_buf.extend_from_slice(b"*0\r\n"),
-                None => response_buf.extend_from_slice(b"*-1\r\n"),
+                ListLengthResponse::Hit { .. } => response_buf.extend_from_slice(b"*0\r\n"),
+                ListLengthResponse::Miss => response_buf.extend_from_slice(b"*-1\r\n"),
             },
+            // If count is non-zero, we pop the max of the count or the list size
             Some(count) => {
                 let mut items = Vec::with_capacity(count.min(64) as usize);
 
@@ -49,8 +54,11 @@ pub async fn lpop(
                 // potentialy losing or duplicating elements.
                 for _ in 0..count {
                     match timeout(tout, client.list_pop_front(cache_name, req.key())).await?? {
-                        Some(item) => items.push(item),
-                        None => break,
+                        ListPopFrontResponse::Hit { value } => {
+                            let item: Vec<u8> = value.try_into().expect("Expected a byte vector");
+                            items.push(item)
+                        }
+                        ListPopFrontResponse::Miss => break,
                     }
                 }
 

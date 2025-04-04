@@ -2,10 +2,11 @@
 // Licensed under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
-use std::io::Write;
 use std::time::Duration;
+use std::{collections::HashSet, io::Write};
 
-use momento::SimpleCacheClient;
+use momento::cache::SetFetchResponse;
+use momento::CacheClient;
 use protocol_resp::{SetIntersect, SINTER, SINTER_EX};
 use tokio::time;
 
@@ -14,7 +15,7 @@ use crate::ProxyResult;
 use super::update_method_metrics;
 
 pub async fn sinter(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &SetIntersect,
@@ -30,7 +31,15 @@ pub async fn sinter(
         let head = &**head;
 
         let response = time::timeout(timeout, client.set_fetch(cache_name, head)).await??;
-        let mut set = response.value.unwrap_or_default();
+        let mut set = match response {
+            SetFetchResponse::Hit { values } => {
+                let elements: Vec<Vec<u8>> = values
+                    .try_into()
+                    .expect("Expected to fetch a list of byte vectors!");
+                HashSet::<Vec<u8>>::from_iter(elements)
+            }
+            SetFetchResponse::Miss => HashSet::default(),
+        };
 
         for key in rest {
             let key = &**key;
@@ -40,8 +49,17 @@ pub async fn sinter(
             }
 
             let response = time::timeout(timeout, client.set_fetch(cache_name, key)).await??;
-            if let Some(value) = response.value {
-                set.retain(|entry| value.contains(entry));
+            match response {
+                SetFetchResponse::Hit { values } => {
+                    let elements: Vec<Vec<u8>> = values
+                        .try_into()
+                        .expect("Expected to fetch a list of byte vectors!");
+                    let elements = HashSet::<Vec<u8>>::from_iter(elements);
+                    set.retain(|entry| elements.contains(entry));
+                }
+                SetFetchResponse::Miss => {
+                    set.clear();
+                }
             }
         }
 

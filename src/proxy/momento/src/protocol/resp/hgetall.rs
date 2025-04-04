@@ -2,10 +2,11 @@
 // Licensed under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
+use std::collections::HashMap;
 use std::time::Duration;
 
-use momento::response::DictionaryFetch;
-use momento::SimpleCacheClient;
+use momento::cache::DictionaryFetchResponse;
+use momento::CacheClient;
 use protocol_resp::{HashGetAll, HGETALL, HGETALL_EX, HGETALL_HIT, HGETALL_MISS};
 
 use crate::error::ProxyResult;
@@ -15,7 +16,7 @@ use crate::ProxyError;
 use super::update_method_metrics;
 
 pub async fn hgetall(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &HashGetAll,
@@ -39,13 +40,15 @@ pub async fn hgetall(
         };
 
         match response {
-            DictionaryFetch::Hit { value } => {
+            DictionaryFetchResponse::Hit { .. } => {
                 HGETALL_HIT.increment();
-                let map: Vec<(Vec<u8>, Vec<u8>)> = value.collect_into();
+                let map: HashMap<Vec<u8>, Vec<u8>> = response
+                    .try_into()
+                    .expect("should always be able to read dictionary fields as bytes");
 
                 response_buf.extend_from_slice(format!("*{}\r\n", map.len() * 2).as_bytes());
 
-                for (field, value) in map {
+                for (field, value) in map.into_iter() {
                     let field_header = format!("${}\r\n", field.len());
                     let value_header = format!("${}\r\n", value.len());
 
@@ -59,7 +62,7 @@ pub async fn hgetall(
 
                 klog_1(&"hgetall", &req.key(), Status::Hit, response_buf.len());
             }
-            DictionaryFetch::Miss => {
+            DictionaryFetchResponse::Miss => {
                 HGETALL_MISS.increment();
                 response_buf.extend_from_slice(b"*0\r\n");
                 klog_1(&"hgetall", &req.key(), Status::Miss, response_buf.len());

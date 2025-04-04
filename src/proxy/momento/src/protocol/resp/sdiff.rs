@@ -2,10 +2,10 @@
 // Licensed under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
-use std::io::Write;
 use std::time::Duration;
+use std::{collections::HashSet, io::Write};
 
-use momento::SimpleCacheClient;
+use momento::{cache::SetFetchResponse, CacheClient};
 use protocol_resp::{SetDiff, SDIFF, SDIFF_EX};
 use tokio::time;
 
@@ -14,7 +14,7 @@ use crate::ProxyResult;
 use super::update_method_metrics;
 
 pub async fn sdiff(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &SetDiff,
@@ -30,7 +30,16 @@ pub async fn sdiff(
         let head = &**head;
 
         let response = time::timeout(timeout, client.set_fetch(cache_name, head)).await??;
-        let Some(mut set) = response.value else {
+        let mut set = match response {
+            SetFetchResponse::Hit { values } => {
+                let elements: Vec<Vec<u8>> = values
+                    .try_into()
+                    .expect("Expected to fetch a list of byte vectors!");
+                HashSet::<Vec<u8>>::from_iter(elements)
+            }
+            SetFetchResponse::Miss => HashSet::default(),
+        };
+        if set.is_empty() {
             response_buf.extend_from_slice(b"*0\r\n");
             return Ok(());
         };
@@ -43,9 +52,17 @@ pub async fn sdiff(
             }
 
             let response = time::timeout(timeout, client.set_fetch(cache_name, key)).await??;
-            if let Some(value) = response.value {
-                for entry in value {
-                    set.remove(&entry);
+            match response {
+                SetFetchResponse::Hit { values } => {
+                    let elements: Vec<Vec<u8>> = values
+                        .try_into()
+                        .expect("Expected to fetch a list of byte vectors!");
+                    for entry in elements {
+                        set.remove(&entry);
+                    }
+                }
+                SetFetchResponse::Miss => {
+                    continue;
                 }
             }
         }

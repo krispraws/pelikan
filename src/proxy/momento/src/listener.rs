@@ -7,7 +7,7 @@ use pelikan_net::{TCP_ACCEPT, TCP_CLOSE, TCP_CONN_CURR};
 
 pub(crate) async fn listener(
     listener: TcpListener,
-    client_builder: SimpleCacheClientBuilder,
+    client_builder_config: MomentoClientBuilderConfig,
     cache_name: String,
     protocol: Protocol,
 ) {
@@ -17,7 +17,23 @@ pub(crate) async fn listener(
         if let Ok((socket, _)) = listener.accept().await {
             TCP_ACCEPT.increment();
 
-            let client = client_builder.clone().build();
+            let client = match CacheClient::builder()
+                .default_ttl(client_builder_config.default_ttl.clone())
+                .configuration(client_builder_config.client_configuration.clone())
+                .credential_provider(client_builder_config.credential_provider.clone())
+                .build()
+            {
+                Ok(client) => client,
+                Err(e) => {
+                    error!(
+                        "could not build cache client for cache `{}`: {}",
+                        cache_name, e
+                    );
+                    TCP_CLOSE.increment();
+                    continue;
+                }
+            };
+
             let cache_name = cache_name.clone();
 
             // spawn a task for managing requests for the client

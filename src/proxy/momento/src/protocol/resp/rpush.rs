@@ -5,30 +5,30 @@
 use std::io::Write;
 
 use crate::*;
+use momento::cache::ListConcatenateBackRequest;
 use protocol_resp::{ListPushBack, RPUSH, RPUSH_EX};
 
 use super::update_method_metrics;
 
 pub async fn rpush(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &ListPushBack,
 ) -> ProxyResult {
     update_method_metrics(&RPUSH, &RPUSH_EX, async move {
-        let count = timeout(
-            Duration::from_millis(200),
-            client.list_concat_back(
-                cache_name,
-                req.key(),
-                req.elements().iter().map(|e| &e[..]),
-                None,
-                COLLECTION_TTL,
-            ),
+        let r = ListConcatenateBackRequest::new(
+            cache_name,
+            &*req.key(),
+            req.elements().iter().map(|e| &e[..]),
         )
-        .await??;
+        .ttl(COLLECTION_TTL)
+        .truncate_front_to_size(None);
+        let _resp = timeout(Duration::from_millis(200), client.send_request(r)).await??;
 
-        write!(response_buf, ":{count}\r\n")?;
+        // Momento rust sdk doesn't return the count of elements added,
+        // so we assume it's the same as the number of elements in the request.
+        write!(response_buf, ":{}\r\n", req.elements().len())?;
 
         Ok(())
     })

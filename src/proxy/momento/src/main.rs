@@ -15,7 +15,9 @@ use core::time::Duration;
 use logger::configure_logging;
 use logger::Drain;
 use metriken::*;
-use momento::*;
+use momento::{CacheClient, CredentialProvider};
+
+use momento::cache::{configurations, CollectionTtl, Configuration};
 use pelikan_net::TCP_RECV_BYTE;
 use protocol_admin::*;
 use session::*;
@@ -50,7 +52,7 @@ mod protocol;
 // The following environment variables are necessary to configure the proxy
 // until the config file is finalized:
 //
-// MOMENTO_AUTHENTICATION - the Momento authentication token
+// MOMENTO_API_KEY - the Momento authentication token
 
 // the default buffer size is matched to the upper-bound on TLS fragment size as
 // per RFC 5246 https://datatracker.ietf.org/doc/html/rfc5246#section-6.2.1
@@ -148,6 +150,13 @@ pub static RU_NVCSW: Counter = Counter::new();
 
 #[metric(name = "ru_nivcsw")]
 pub static RU_NIVCSW: Counter = Counter::new();
+
+#[derive(Clone)]
+pub struct MomentoClientBuilderConfig {
+    default_ttl: Duration,
+    client_configuration: Configuration,
+    credential_provider: CredentialProvider,
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // custom panic hook to terminate whole process after unwinding
@@ -296,25 +305,20 @@ async fn spawn(
     info!("starting proxy admin listener on: {}", admin_addr);
 
     // initialize the Momento cache client
-    if std::env::var("MOMENTO_AUTHENTICATION").is_err() {
-        eprintln!("environment variable `MOMENTO_AUTHENTICATION` is not set");
+    if std::env::var("MOMENTO_API_KEY").is_err() {
+        eprintln!("environment variable `MOMENTO_API_KEY` is not set");
         std::process::exit(1);
     }
-    let auth_token =
-        std::env::var("MOMENTO_AUTHENTICATION").expect("MOMENTO_AUTHENTICATION must be set");
-    let credential_provider = CredentialProviderBuilder::from_string(auth_token)
-        .build()
-        .unwrap_or_else(|e| {
-            eprintln!("failed to initialize credential provider. error: {e}");
-            std::process::exit(1);
-        });
-    let client_builder = match SimpleCacheClientBuilder::new(credential_provider, DEFAULT_TTL) {
-        Ok(c) => c,
+
+    let credential_provider = match CredentialProvider::from_env_var("MOMENTO_API_KEY".to_string())
+    {
+        Ok(v) => v,
         Err(e) => {
-            eprintln!("could not create cache client: {}", e);
+            eprintln!("MOMENTO_API_KEY key should be valid: {e}");
             std::process::exit(1);
         }
     };
+    let client_configuration = configurations::LowLatency::latest().into();
 
     if config.caches().is_empty() {
         error!("no caches specified in the config");
@@ -324,8 +328,6 @@ async fn spawn(
 
     for i in 0..config.caches().len() {
         let config = config.clone();
-        let client_builder = client_builder.clone();
-
         let cache = config.caches().get(i).unwrap().clone();
         let addr = match cache.socket_addr() {
             Ok(v) => v,
@@ -366,9 +368,14 @@ async fn spawn(
                 std::process::exit(1);
             }
         };
-
+        let client_configuration = client_configuration.clone();
+        let credential_provider = credential_provider.clone();
         tokio::spawn(async move {
-            let client_builder = client_builder.default_ttl(ttl).expect("bad default ttl");
+            let client_builder_config = MomentoClientBuilderConfig {
+                default_ttl: ttl,
+                client_configuration,
+                credential_provider,
+            };
 
             info!(
                 "starting proxy frontend listener for cache `{}` on: {}",
@@ -379,7 +386,7 @@ async fn spawn(
                 TcpListener::from_std(tcp_listener).expect("could not convert to tokio listener");
             listener::listener(
                 tcp_listener,
-                client_builder,
+                client_builder_config,
                 cache.cache_name(),
                 cache.protocol(),
             )

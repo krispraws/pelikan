@@ -5,7 +5,8 @@
 use std::io::Write;
 use std::time::Duration;
 
-use momento::SimpleCacheClient;
+use momento::cache::ListLengthResponse;
+use momento::CacheClient;
 use protocol_resp::{ListLen, LLEN, LLEN_EX};
 
 use crate::error::ProxyResult;
@@ -15,7 +16,7 @@ use crate::ProxyError;
 use super::update_method_metrics;
 
 pub async fn llen(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &ListLen,
@@ -38,9 +39,16 @@ pub async fn llen(
             }
         };
 
-        write!(response_buf, ":{}\r\n", len.unwrap_or(0))?;
-        klog_1(&"llen", &req.key(), Status::Hit, response_buf.len());
-
+        match len {
+            ListLengthResponse::Hit { length } => {
+                write!(response_buf, ":{}\r\n", length)?;
+                klog_1(&"llen", &req.key(), Status::Hit, response_buf.len());
+            }
+            ListLengthResponse::Miss => {
+                write!(response_buf, ":{}\r\n", 0)?;
+                klog_1(&"llen", &req.key(), Status::Miss, response_buf.len());
+            }
+        }
         Ok(())
     })
     .await

@@ -2,10 +2,11 @@
 // Licensed under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
+use std::collections::HashMap;
 use std::time::Duration;
 
-use momento::response::DictionaryFetch;
-use momento::SimpleCacheClient;
+use momento::cache::DictionaryFetchResponse;
+use momento::CacheClient;
 use protocol_resp::{HashKeys, HKEYS, HKEYS_EX, HKEYS_HIT, HKEYS_MISS};
 
 use crate::error::ProxyResult;
@@ -15,7 +16,7 @@ use crate::ProxyError;
 use super::update_method_metrics;
 
 pub async fn hkeys(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &HashKeys,
@@ -39,10 +40,11 @@ pub async fn hkeys(
         };
 
         match response {
-            DictionaryFetch::Hit { value } => {
+            DictionaryFetchResponse::Hit { .. } => {
                 HKEYS_HIT.increment();
-                let map: Vec<(Vec<u8>, Vec<u8>)> = value.collect_into();
-
+                let map: HashMap<Vec<u8>, Vec<u8>> = response
+                    .try_into()
+                    .expect("should always be able to read dictionary fields as bytes");
                 response_buf.extend_from_slice(format!("*{}\r\n", map.len()).as_bytes());
 
                 for (field, _value) in map.iter() {
@@ -55,7 +57,7 @@ pub async fn hkeys(
 
                 klog_1(&"hkeys", &req.key(), Status::Hit, response_buf.len());
             }
-            DictionaryFetch::Miss => {
+            DictionaryFetchResponse::Miss => {
                 HKEYS_MISS.increment();
                 klog_1(&"hkeys", &req.key(), Status::Miss, response_buf.len());
             }

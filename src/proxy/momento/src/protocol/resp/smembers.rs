@@ -6,7 +6,8 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::time::Duration;
 
-use momento::SimpleCacheClient;
+use momento::cache::SetFetchResponse;
+use momento::CacheClient;
 use protocol_resp::{SetMembers, SMEMBERS, SMEMBERS_EX};
 use tokio::time;
 
@@ -17,7 +18,7 @@ use crate::ProxyError;
 use super::update_method_metrics;
 
 pub async fn smembers(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &SetMembers,
@@ -31,18 +32,23 @@ pub async fn smembers(
         {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
-                klog_1(&"sismember", &req.key(), Status::ServerError, 0);
+                klog_1(&"smembers", &req.key(), Status::ServerError, 0);
                 return Err(ProxyError::from(e));
             }
             Err(e) => {
-                klog_1(&"sismember", &req.key(), Status::Timeout, 0);
+                klog_1(&"smembers", &req.key(), Status::Timeout, 0);
                 return Err(ProxyError::from(e));
             }
         };
 
-        let (set, status) = match response.value {
-            Some(set) => (set, Status::Hit),
-            None => (HashSet::default(), Status::Miss),
+        let (set, status) = match response {
+            SetFetchResponse::Hit { values } => {
+                let elements: Vec<Vec<u8>> = values
+                    .try_into()
+                    .expect("Expected to fetch a list of byte vectors!");
+                (HashSet::<Vec<u8>>::from_iter(elements), Status::Hit)
+            }
+            SetFetchResponse::Miss => (HashSet::default(), Status::Miss),
         };
 
         write!(response_buf, "*{}\r\n", set.len())?;
@@ -52,7 +58,7 @@ pub async fn smembers(
             response_buf.extend_from_slice(entry);
         }
 
-        klog_1(&"sismember", &req.key(), status, response_buf.len());
+        klog_1(&"smembers", &req.key(), status, response_buf.len());
 
         Ok(())
     })

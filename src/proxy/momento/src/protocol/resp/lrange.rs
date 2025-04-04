@@ -5,7 +5,10 @@
 use std::io::Write;
 use std::time::Duration;
 
-use momento::SimpleCacheClient;
+use momento::{
+    cache::{ListFetchRequest, ListFetchResponse},
+    CacheClient,
+};
 use protocol_resp::{ListRange, LRANGE, LRANGE_EX};
 use tokio::time::timeout;
 
@@ -14,69 +17,32 @@ use crate::error::ProxyResult;
 use super::update_method_metrics;
 
 pub async fn lrange(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &ListRange,
 ) -> ProxyResult {
     update_method_metrics(&LRANGE, &LRANGE_EX, async move {
-        let Some(list) = timeout(
-            Duration::from_millis(200),
-            client.list_fetch(cache_name, req.key()),
-        )
-        .await??
-        else {
-            response_buf.extend_from_slice(b"*0\r\n");
+        let r = ListFetchRequest::new(cache_name, req.key())
+            .start_index(i32::try_from(req.start()).ok())
+            .end_index(i32::try_from(req.stop().saturating_add(1)).ok()); // Momento uses exclusive ends
 
-            return Ok(());
-        };
-        let list = list.into_value();
+        match timeout(Duration::from_millis(200), client.send_request(r)).await?? {
+            ListFetchResponse::Hit { values } => {
+                let elements: Vec<Vec<u8>> = values
+                    .try_into()
+                    .expect("Expected to fetch a list of byte vectors!");
+                write!(response_buf, "*{}\r\n", elements.len())?;
 
-        let start: usize = match req.start() {
-            start @ 0.. => start.try_into().unwrap_or(usize::MAX),
-            start @ ..=-1 => {
-                let inv = (-start).try_into().unwrap_or(usize::MAX);
-                list.len().saturating_sub(inv)
-            }
-        };
-        let end: usize = match req.stop() {
-            end @ 0.. => end.try_into().unwrap_or(usize::MAX),
-            end @ ..=-1 => {
-                let inv = (-end).try_into().unwrap_or(usize::MAX);
-
-                match list.len().checked_sub(inv) {
-                    Some(end) => end,
-                    None => {
-                        response_buf.extend_from_slice(b"*0\r\n");
-                        return Ok(());
-                    }
+                for elem in elements {
+                    write!(response_buf, "${}\r\n", elem.len())?;
+                    response_buf.extend_from_slice(&elem);
                 }
             }
-        };
-
-        if start >= list.len() || start > end {
-            response_buf.extend_from_slice(b"*0\r\n");
-            return Ok(());
-        }
-
-        let start = start.min(list.len());
-        let end = end.min(list.len().saturating_sub(1));
-
-        let elems = match list.get(start..=end) {
-            Some(elems) => elems,
-            None => {
+            ListFetchResponse::Miss => {
                 response_buf.extend_from_slice(b"*0\r\n");
-                return Ok(());
             }
         };
-
-        write!(response_buf, "*{}\r\n", elems.len())?;
-
-        for elem in elems {
-            write!(response_buf, "${}\r\n", elem.len())?;
-            response_buf.extend_from_slice(elem);
-        }
-
         Ok(())
     })
     .await
