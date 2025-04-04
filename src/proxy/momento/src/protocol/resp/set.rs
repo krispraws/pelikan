@@ -4,7 +4,8 @@
 
 use std::time::Duration;
 
-use momento::SimpleCacheClient;
+use momento::cache::SetRequest;
+use momento::CacheClient;
 use protocol_memcache::{SET, SET_EX, SET_STORED};
 use protocol_resp::Set;
 
@@ -14,7 +15,7 @@ use crate::klog::{klog_set, Status};
 use super::update_method_metrics;
 
 pub async fn set(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &Set,
@@ -29,9 +30,13 @@ pub async fn set(
             None => None,
         };
 
+        let mut r = SetRequest::new(cache_name, req.key(), req.value());
+        if let Some(ttl) = ttl {
+            r = r.ttl(ttl);
+        }
         let _response = match tokio::time::timeout(
             Duration::from_millis(200),
-            client.set(cache_name, req.key(), req.value(), ttl),
+            client.send_request(r),
         )
         .await
         {

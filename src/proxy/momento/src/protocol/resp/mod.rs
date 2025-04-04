@@ -4,7 +4,7 @@
 
 use std::future::Future;
 
-use momento::response::MomentoError;
+use momento::MomentoError;
 pub use protocol_resp::{Request, RequestParser};
 
 mod del;

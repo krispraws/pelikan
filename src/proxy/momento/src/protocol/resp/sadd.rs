@@ -5,7 +5,7 @@
 use std::io::Write;
 use std::time::Duration;
 
-use momento::SimpleCacheClient;
+use momento::CacheClient;
 use protocol_resp::{SetAdd, SADD, SADD_EX};
 
 use crate::error::ProxyResult;
@@ -14,7 +14,7 @@ use crate::COLLECTION_TTL;
 use super::update_method_metrics;
 
 pub async fn sadd(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &SetAdd,

@@ -25,7 +25,7 @@ Follow the [build steps](https://github.com/twitter/pelikan#building-pelikan) in
 
 ### Authentication Token
 
-The Momento proxy requires that the `MOMENTO_AUTHENTICATION` environment
+The Momento proxy requires that the `MOMENTO_API_KEY` environment
 variable is set and contains a valid Momento authentication token.
 
 If you're new to Momento, you should refer to the
@@ -67,7 +67,7 @@ docker run -d \
   -p 11211:11211 \
   -p 6379:6379 \
   -p 9999:9999 \
-  -e MOMENTO_AUTHENTICATION=<YOUR_MOMENTO_TOKEN> \
+  -e MOMENTO_API_KEY=<YOUR_MOMENTO_TOKEN> \
   gomomento/momento-proxy
 ```
 
@@ -79,7 +79,7 @@ docker run -d \
   -p 11211:11211 \
   -p 6379:6379 \
   -p 9999:9999 \
-  -e MOMENTO_AUTHENTICATION=<YOUR_MOMENTO_TOKEN> \
+  -e MOMENTO_API_KEY=<YOUR_MOMENTO_TOKEN> \
   -e CONFIG=my_custom_config.toml \
   -v /your/path/to/config/dir:/app/config gomomento/momento-proxy
 ```
@@ -99,7 +99,7 @@ docker run -d \
   -p 11211:11211 \
   -p 6379:6379 \
   -p 9999:9999 \
-  -e MOMENTO_AUTHENTICATION=<YOUR_MOMENTO_TOKEN> \
+  -e MOMENTO_API_KEY=<YOUR_MOMENTO_TOKEN> \
   momento-proxy
 ```
 
@@ -110,7 +110,7 @@ docker run -d \
   -p 11211:11211 \
   -p 6379:6379 \
   -p 9999:9999 \
-  -e MOMENTO_AUTHENTICATION=<YOUR_MOMENTO_TOKEN> \
+  -e MOMENTO_API_KEY=<YOUR_MOMENTO_TOKEN> \
   -e CONFIG=<YOUR_CONFIG_FILE> \
   -v /your/path/to/config/dir:/app/config \
   momento-proxy

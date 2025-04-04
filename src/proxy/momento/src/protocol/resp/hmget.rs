@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use momento::response::DictionaryGet;
-use momento::SimpleCacheClient;
+use momento::cache::DictionaryGetFieldsResponse;
+use momento::CacheClient;
 use protocol_resp::{
     HashMultiGet, HMGET, HMGET_EX, HMGET_FIELD, HMGET_FIELD_HIT, HMGET_FIELD_MISS,
 };
@@ -18,7 +18,7 @@ use crate::ProxyError;
 use super::update_method_metrics;
 
 pub async fn hmget(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &HashMultiGet,
@@ -27,7 +27,7 @@ pub async fn hmget(
         let fields: Vec<_> = req.fields().iter().map(|x| &**x).collect();
         let response = match tokio::time::timeout(
             Duration::from_millis(200),
-            client.dictionary_get(cache_name, req.key(), fields),
+            client.dictionary_get_fields(cache_name, req.key(), fields),
         )
         .await
         {
@@ -47,8 +47,10 @@ pub async fn hmget(
         };
 
         match response {
-            DictionaryGet::Hit { value } => {
-                let map: HashMap<Vec<u8>, Vec<u8>> = value.collect_into();
+            DictionaryGetFieldsResponse::Hit { .. } => {
+                let map: HashMap<Vec<u8>, Vec<u8>> = response
+                    .try_into()
+                    .expect("should always be able to read dictionary fields as bytes");
 
                 response_buf.extend_from_slice(format!("*{}\r\n", req.fields().len()).as_bytes());
 
@@ -76,7 +78,7 @@ pub async fn hmget(
                 HMGET_FIELD_HIT.add(hit);
                 HMGET_FIELD_MISS.add(miss);
             }
-            DictionaryGet::Miss => {
+            DictionaryGetFieldsResponse::Miss => {
                 // treat every requested field as a miss
                 response_buf.extend_from_slice(format!("*{}\r\n", req.fields().len()).as_bytes());
 

@@ -6,7 +6,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use momento::response::MomentoSetDifferenceResponse;
-use momento::SimpleCacheClient;
+use momento::CacheClient;
 use protocol_resp::{SetRem, SREM, SREM_EX};
 
 use crate::error::ProxyResult;
@@ -14,7 +14,7 @@ use crate::error::ProxyResult;
 use super::update_method_metrics;
 
 pub async fn srem(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &SetRem,

@@ -4,11 +4,12 @@
 
 use crate::klog::{klog_set, Status};
 use crate::{Error, *};
+use momento::cache::SetRequest;
 use pelikan_net::*;
 use protocol_memcache::*;
 
 pub async fn set(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     socket: &mut tokio::net::TcpStream,
     request: &protocol_memcache::Set,
@@ -30,11 +31,15 @@ pub async fn set(
     let ttl = request
         .ttl()
         .get()
-        .map(|ttl| Duration::from_millis(ttl.max(1) as u64));
+        .map(|ttl| Duration::from_secs(ttl.max(1) as u64));
 
+    let mut r = SetRequest::new(cache_name, key, value);
+    if let Some(ttl) = ttl {
+        r = r.ttl(ttl);
+    }
     match timeout(
         Duration::from_millis(200),
-        client.set(cache_name, key, value, ttl),
+        client.send_request(r),
     )
     .await
     {

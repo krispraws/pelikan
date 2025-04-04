@@ -2,10 +2,11 @@
 // Licensed under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
+use std::collections::HashMap;
 use std::time::Duration;
 
-use momento::response::DictionaryFetch;
-use momento::SimpleCacheClient;
+use momento::cache::DictionaryFetchResponse;
+use momento::CacheClient;
 use protocol_resp::{HashValues, HVALS, HVALS_EX, HVALS_HIT, HVALS_MISS};
 
 use crate::error::ProxyResult;
@@ -15,7 +16,7 @@ use crate::ProxyError;
 use super::update_method_metrics;
 
 pub async fn hvals(
-    client: &mut SimpleCacheClient,
+    client: &mut CacheClient,
     cache_name: &str,
     response_buf: &mut Vec<u8>,
     req: &HashValues,
@@ -39,13 +40,15 @@ pub async fn hvals(
         };
 
         match response {
-            DictionaryFetch::Hit { value } => {
+            DictionaryFetchResponse::Hit { .. } => {
                 HVALS_HIT.increment();
-                let map: Vec<(Vec<u8>, Vec<u8>)> = value.collect_into();
+                let map: HashMap<Vec<u8>, Vec<u8>> = response
+                    .try_into()
+                    .expect("should always be able to read dictionary fields as bytes");
 
                 response_buf.extend_from_slice(format!("*{}\r\n", map.len()).as_bytes());
 
-                for (_filed, value) in map.iter() {
+                for (_field, value) in map.iter() {
                     let value_header = format!("${}\r\n", value.len());
 
                     response_buf.extend_from_slice(value_header.as_bytes());
@@ -55,7 +58,7 @@ pub async fn hvals(
 
                 klog_1(&"hvals", &req.key(), Status::Hit, response_buf.len());
             }
-            DictionaryFetch::Miss => {
+            DictionaryFetchResponse::Miss => {
                 HVALS_MISS.increment();
                 // per command reference, return an empty list
                 response_buf.extend_from_slice(b"*0\r\n");
